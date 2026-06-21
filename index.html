@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Q&amp;A Dataset Pipeline — Case Study</title>
+<meta name="description" content="A 480,000-word textbook turned into a clean instruction-tuning dataset with the Gemini API — engineered to never exceed the free-tier quota." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#0d1a21;
+    --panel:#12262f;
+    --panel-2:#16313c;
+    --line:#234653;
+    --line-soft:#1a3742;
+    --ink:#e9f1f2;
+    --muted:#7f9aa6;
+    --amber:#f2a33c;
+    --amber-soft:#f7c074;
+    --cyan:#5fd0c8;
+    --radius:14px;
+    --maxw:1080px;
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(95,208,200,.08), transparent 60%),
+      radial-gradient(900px 500px at -10% 20%, rgba(242,163,60,.06), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,sans-serif;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  a{color:inherit;}
+
+  /* faint blueprint grid overlay */
+  body::before{
+    content:"";
+    position:fixed;inset:0;
+    background-image:
+      linear-gradient(var(--line-soft) 1px,transparent 1px),
+      linear-gradient(90deg,var(--line-soft) 1px,transparent 1px);
+    background-size:46px 46px;
+    opacity:.22;
+    pointer-events:none;
+    mask-image:radial-gradient(circle at 50% 30%,black,transparent 85%);
+    z-index:0;
+  }
+
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px;position:relative;z-index:1;}
+
+  .mono{font-family:"IBM Plex Mono",monospace;}
+  .eyebrow{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:.74rem;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--amber);
+  }
+
+  /* ---------------- NAV ---------------- */
+  nav{
+    position:sticky;top:0;z-index:20;
+    backdrop-filter:blur(10px);
+    background:linear-gradient(to bottom,rgba(13,26,33,.92),rgba(13,26,33,.55));
+    border-bottom:1px solid var(--line-soft);
+  }
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:62px;}
+  .brand{display:flex;align-items:center;gap:10px;font-family:"Space Grotesk";font-weight:700;letter-spacing:.01em;}
+  .brand .dot{width:11px;height:11px;border-radius:3px;background:var(--amber);box-shadow:0 0 14px var(--amber);}
+  .nav-links{display:flex;gap:26px;font-size:.9rem;}
+  .nav-links a{text-decoration:none;color:var(--muted);transition:color .2s;}
+  .nav-links a:hover{color:var(--ink);}
+  @media(max-width:680px){.nav-links{display:none;}}
+
+  /* ---------------- HERO ---------------- */
+  header{padding:84px 0 40px;}
+  .h-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center;}
+  @media(max-width:900px){.h-grid{grid-template-columns:1fr;gap:36px;}}
+
+  h1{
+    font-family:"Space Grotesk";
+    font-weight:700;
+    font-size:clamp(2.1rem,4.7vw,3.5rem);
+    line-height:1.04;
+    letter-spacing:-.02em;
+    margin:18px 0 0;
+  }
+  h1 .hl{color:var(--amber);}
+  .lead{color:#c3d3d6;font-size:1.08rem;margin-top:20px;max-width:34ch;}
+
+  .cta-row{display:flex;flex-wrap:wrap;gap:14px;margin-top:30px;}
+  .btn{
+    display:inline-flex;align-items:center;gap:9px;
+    font-family:"IBM Plex Mono",monospace;font-size:.9rem;font-weight:500;
+    padding:12px 18px;border-radius:10px;text-decoration:none;
+    border:1px solid var(--line);transition:transform .15s,border-color .2s,background .2s;
+  }
+  .btn:focus-visible{outline:2px solid var(--cyan);outline-offset:3px;}
+  .btn.primary{background:var(--amber);color:#241502;border-color:var(--amber);font-weight:600;}
+  .btn.primary:hover{transform:translateY(-2px);background:var(--amber-soft);}
+  .btn.ghost{color:var(--ink);background:rgba(255,255,255,.02);}
+  .btn.ghost:hover{transform:translateY(-2px);border-color:var(--cyan);color:#fff;}
+  .btn svg{width:16px;height:16px;}
+
+  /* ---------------- PIPELINE SIGNATURE ---------------- */
+  .pipe{
+    background:linear-gradient(160deg,var(--panel),var(--bg));
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:22px 20px 18px;
+    box-shadow:0 30px 60px -30px rgba(0,0,0,.7);
+  }
+  .pipe-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
+  .pipe-head .t{font-family:"IBM Plex Mono";font-size:.72rem;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;}
+  .pipe-dots{display:flex;gap:6px;}
+  .pipe-dots i{width:9px;height:9px;border-radius:50%;background:var(--line);}
+  .pipe-dots i:nth-child(1){background:#e06d5a;}
+  .pipe-dots i:nth-child(2){background:var(--amber);}
+  .pipe-dots i:nth-child(3){background:var(--cyan);}
+
+  .stage{
+    display:flex;align-items:center;gap:14px;
+    padding:11px 12px;border-radius:10px;
+    border:1px solid var(--line-soft);
+    background:rgba(255,255,255,.015);
+    position:relative;
+  }
+  .stage + .rail{height:18px;margin-left:30px;border-left:2px dashed var(--line);position:relative;}
+  .stage + .rail::after{
+    content:"";position:absolute;left:-5px;top:-2px;
+    width:8px;height:8px;border-radius:50%;background:var(--amber);
+    box-shadow:0 0 10px var(--amber);
+    animation:flow 2.6s linear infinite;
+  }
+  .rail.r2::after{animation-delay:.4s;}
+  .rail.r3::after{animation-delay:.8s;}
+  .rail.r4::after{animation-delay:1.2s;}
+  .rail.r5::after{animation-delay:1.6s;}
+  @keyframes flow{0%{top:-2px;opacity:0;}15%{opacity:1;}85%{opacity:1;}100%{top:16px;opacity:0;}}
+
+  .stage .ico{
+    width:34px;height:34px;flex:none;border-radius:9px;display:grid;place-items:center;
+    background:var(--panel-2);border:1px solid var(--line);color:var(--cyan);
+  }
+  .stage .ico.amber{color:var(--amber);}
+  .stage .ico svg{width:18px;height:18px;}
+  .stage .s-name{font-weight:600;font-size:.95rem;}
+  .stage .s-sub{font-family:"IBM Plex Mono";font-size:.72rem;color:var(--muted);}
+
+  /* ---------------- STАТ STRIP ---------------- */
+  .stats{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+    background:var(--line-soft);border:1px solid var(--line-soft);
+    border-radius:var(--radius);overflow:hidden;margin-top:54px;
+  }
+  @media(max-width:680px){.stats{grid-template-columns:repeat(2,1fr);}}
+  .stat{background:var(--bg);padding:22px 20px;}
+  .stat .n{font-family:"Space Grotesk";font-weight:700;font-size:1.7rem;color:var(--ink);}
+  .stat .n b{color:var(--amber);font-weight:700;}
+  .stat .l{font-family:"IBM Plex Mono";font-size:.72rem;letter-spacing:.06em;color:var(--muted);margin-top:4px;text-transform:uppercase;}
+
+  /* ---------------- SECTIONS ---------------- */
+  section{padding:78px 0;border-top:1px solid var(--line-soft);}
+  .sec-head{max-width:60ch;margin-bottom:40px;}
+  .sec-head h2{
+    font-family:"Space Grotesk";font-weight:700;font-size:clamp(1.5rem,3vw,2.1rem);
+    letter-spacing:-.01em;margin:10px 0 0;
+  }
+  .sec-head p{color:#b6c6c9;margin-top:12px;}
+
+  /* problem */
+  .prob{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+  @media(max-width:760px){.prob{grid-template-columns:1fr;}}
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:24px;
+  }
+  .card h3{font-family:"Space Grotesk";font-size:1.05rem;margin:0 0 8px;}
+  .card p{color:#aebfc2;font-size:.96rem;margin:0;}
+  .card .tag{font-family:"IBM Plex Mono";font-size:.7rem;color:var(--amber);letter-spacing:.1em;text-transform:uppercase;}
+
+  /* engineering highlights — numbered because this is a real ordered build */
+  .feat{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;}
+  @media(max-width:760px){.feat{grid-template-columns:1fr;}}
+  .feat-item{
+    border:1px solid var(--line);border-radius:var(--radius);
+    padding:24px;background:linear-gradient(180deg,var(--panel),rgba(18,38,47,.4));
+    position:relative;overflow:hidden;
+  }
+  .feat-item .num{
+    font-family:"IBM Plex Mono";font-size:.8rem;color:var(--amber);
+    border:1px solid var(--line);border-radius:7px;padding:3px 8px;display:inline-block;
+  }
+  .feat-item h3{font-family:"Space Grotesk";font-size:1.12rem;margin:14px 0 8px;}
+  .feat-item p{color:#aebfc2;font-size:.95rem;margin:0;}
+  .feat-item::after{
+    content:"";position:absolute;right:-40px;bottom:-40px;width:120px;height:120px;
+    background:radial-gradient(circle,rgba(95,208,200,.10),transparent 70%);
+  }
+
+  /* terminal */
+  .term{
+    background:#091419;border:1px solid var(--line);border-radius:var(--radius);
+    overflow:hidden;box-shadow:0 24px 50px -28px rgba(0,0,0,.8);
+  }
+  .term-bar{display:flex;gap:7px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line-soft);}
+  .term-bar i{width:11px;height:11px;border-radius:50%;background:var(--line);}
+  .term-bar i:nth-child(1){background:#e06d5a;}
+  .term-bar i:nth-child(2){background:var(--amber);}
+  .term-bar i:nth-child(3){background:var(--cyan);}
+  .term-bar span{font-family:"IBM Plex Mono";font-size:.72rem;color:var(--muted);margin-left:8px;}
+  .term pre{
+    margin:0;padding:20px 18px;font-family:"IBM Plex Mono";font-size:.85rem;line-height:1.75;
+    color:#cdd9da;overflow-x:auto;
+  }
+  .term .c{color:var(--cyan);}
+  .term .p{color:var(--amber);}
+  .term .g{color:#6f8a8f;}
+  .term .ok{color:#8ad6a0;}
+
+  /* stack */
+  .stack{display:flex;flex-wrap:wrap;gap:12px;}
+  .chip{
+    font-family:"IBM Plex Mono";font-size:.84rem;
+    border:1px solid var(--line);border-radius:9px;padding:9px 14px;
+    background:var(--panel);color:#cdd9da;display:flex;gap:9px;align-items:center;
+  }
+  .chip b{color:var(--amber);font-weight:500;}
+
+  /* footer */
+  footer{padding:64px 0 80px;border-top:1px solid var(--line-soft);text-align:center;}
+  footer h2{font-family:"Space Grotesk";font-size:clamp(1.4rem,3vw,2rem);margin:0 0 10px;}
+  footer p{color:var(--muted);margin:0 auto 26px;max-width:46ch;}
+  .foot-meta{margin-top:40px;font-family:"IBM Plex Mono";font-size:.74rem;color:var(--muted);}
+
+  /* reveal */
+  .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease;}
+  .reveal.in{opacity:1;transform:none;}
+  @media(prefers-reduced-motion:reduce){
+    .reveal{opacity:1;transform:none;transition:none;}
+    .stage + .rail::after{animation:none;opacity:.7;top:6px;}
+    html{scroll-behavior:auto;}
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-inner">
+    <div class="brand"><span class="dot"></span> dataset.pipeline</div>
+    <div class="nav-links">
+      <a href="#problem">Problem</a>
+      <a href="#flow">How it works</a>
+      <a href="#engineering">Engineering</a>
+      <a href="#stack">Stack</a>
+      <a href="#links">Links</a>
+    </div>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap h-grid">
+    <div>
+      <div class="eyebrow">Case study · Data engineering</div>
+      <h1>A 480k-word textbook, turned into a <span class="hl">clean training dataset</span> — without ever breaking the free-tier quota.</h1>
+      <p class="lead">A config-driven Python pipeline that chunks a Markdown book, generates grounded Q&amp;A and summary pairs with Gemini, validates and de-duplicates them, and ships the result to the Hugging Face Hub.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="https://github.com/saifihiba1122/Q-A-dataset" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 8.8 21.5c.5.09.68-.22.68-.48l-.01-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.15-1.11-1.46-1.11-1.46-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.93.36.31.68.92.68 1.85l-.01 2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+          View on GitHub
+        </a>
+        <a class="btn ghost" href="https://huggingface.co/datasets/saifigohar1122/new-data_set" target="_blank" rel="noopener">
+          🤗 View Dataset
+        </a>
+      </div>
+    </div>
+
+    <!-- SIGNATURE: the pipeline itself -->
+    <div class="pipe reveal">
+      <div class="pipe-head">
+        <span class="t">data flow</span>
+        <span class="pipe-dots"><i></i><i></i><i></i></span>
+      </div>
+
+      <div class="stage">
+        <span class="ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/></svg></span>
+        <div><div class="s-name">Chemistry-LR.md</div><div class="s-sub">480,419 words</div></div>
+      </div>
+      <div class="rail"></div>
+
+      <div class="stage">
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="7"/><rect x="14" y="4" width="7" height="7"/><rect x="3" y="14" width="7" height="6"/><rect x="14" y="14" width="7" height="6"/></svg></span>
+        <div><div class="s-name">Dual chunker</div><div class="s-sub">small = Q&amp;A · large = summary</div></div>
+      </div>
+      <div class="rail r2"></div>
+
+      <div class="stage">
+        <span class="ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="4"/></svg></span>
+        <div><div class="s-name">Gemini 2.5 Flash</div><div class="s-sub">grounded JSON pairs</div></div>
+      </div>
+      <div class="rail r3"></div>
+
+      <div class="stage">
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></span>
+        <div><div class="s-name">Validate + de-dup</div><div class="s-sub">quality filters</div></div>
+      </div>
+      <div class="rail r4"></div>
+
+      <div class="stage">
+        <span class="ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 9v11"/></svg></span>
+        <div><div class="s-name">train.jsonl</div><div class="s-sub">instruction · input · output</div></div>
+      </div>
+      <div class="rail r5"></div>
+
+      <div class="stage">
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></svg></span>
+        <div><div class="s-name">Hugging Face Hub</div><div class="s-sub">push_to_hub()</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="stats reveal">
+      <div class="stat"><div class="n"><b>480k</b></div><div class="l">source words</div></div>
+      <div class="stat"><div class="n">14</div><div class="l">API calls used</div></div>
+      <div class="stat"><div class="n"><b>18</b></div><div class="l">hard daily cap</div></div>
+      <div class="stat"><div class="n">0</div><div class="l">quota overruns</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- PROBLEM -->
+<section id="problem">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="eyebrow">The constraint</div>
+      <h2>Big book, tiny budget.</h2>
+      <p>A free Gemini key allows only a handful of requests per day. A naïve script either burns through the quota mid-run and loses everything, or silently exceeds it. The whole design is shaped by that single limit.</p>
+    </div>
+    <div class="prob">
+      <div class="card reveal"><div class="tag">Challenge</div><h3>Free-tier daily cap</h3><p>Every request counts — including failed retries, which the API still bills. A counter that only tracks successes drifts below real usage and blows the cap without warning.</p></div>
+      <div class="card reveal"><div class="tag">Challenge</div><h3>Half a million words</h3><p>The book is far too large for one prompt, and small chunks would need hundreds of calls. Chunk sizing had to fit the entire job inside the daily budget.</p></div>
+      <div class="card reveal"><div class="tag">Challenge</div><h3>Runs span days</h3><p>One day's quota isn't enough, so the job must survive being stopped and resumed — no duplicate work, no lost records.</p></div>
+      <div class="card reveal"><div class="tag">Challenge</div><h3>Messy model output</h3><p>LLMs wrap JSON in markdown, truncate long replies, and repeat themselves. Raw output can't be trusted as a dataset.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section id="flow">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="eyebrow">The pipeline</div>
+      <h2>Six stages, one command.</h2>
+      <p>Each Markdown file flows through two passes — a precise pass for Q&amp;A and a broad pass for summaries — before becoming validated JSONL ready for the Hub.</p>
+    </div>
+    <div class="term reveal">
+      <div class="term-bar"><i></i><i></i><i></i><span>D:\data_set — generate</span></div>
+<pre><span class="g"># see today's usage and remaining work — uses NO quota</span>
+<span class="p">$</span> python 02_markdown_to_qa.py <span class="c">status</span>
+Requests used today: 0/18
+Chemistry-LR: QA 0/9 done, Summary 0/5 done, 14 remaining
+
+<span class="g"># generate Q&amp;A + summaries, then push to Hugging Face</span>
+<span class="p">$</span> python 02_markdown_to_qa.py <span class="c">generate --push</span>
+=== Chemistry-LR === 9 QA-chunks, 5 summary-chunks
+[QA 1/9] -> 23 records (quota used: 1/18)
+[Summary 1/5] -> 1 record (quota used: 10/18)
+...
+<span class="ok">Pushed to https://huggingface.co/datasets/...</span>
+</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ENGINEERING -->
+<section id="engineering">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="eyebrow">Why it's robust</div>
+      <h2>The engineering, not just the prompt.</h2>
+      <p>The interesting work isn't asking an LLM for questions — it's making the job safe, repeatable, and impossible to run over budget.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-item reveal"><span class="num">01</span><h3>Quota-honest counting</h3><p>Every call is counted before it's made — successes and retries alike — so the internal counter can never sit below real Google-side usage. A hard ceiling stops the run at the budget, period.</p></div>
+      <div class="feat-item reveal"><span class="num">02</span><h3>Crash-safe resume</h3><p>Progress is written to disk after every chunk with idempotent task IDs. Stop it, crash it, close the terminal — the next run skips finished work and continues exactly where it left off.</p></div>
+      <div class="feat-item reveal"><span class="num">03</span><h3>Dual chunking</h3><p>Two passes over each document: small chunks give Q&amp;A precision, large chunks give summaries the full context of a section. One size never fits both jobs.</p></div>
+      <div class="feat-item reveal"><span class="num">04</span><h3>Trustworthy output</h3><p>JSON mode plus a high token ceiling stop mid-reply truncation; validation drops empty or trivial answers; instruction hashes de-duplicate records across runs.</p></div>
+      <div class="feat-item reveal"><span class="num">05</span><h3>Config-driven</h3><p>Paths, chunk sizes, model, rate limits and Hub settings all live in <span class="mono">config.yaml</span>. Day-to-day tuning never touches the Python.</p></div>
+      <div class="feat-item reveal"><span class="num">06</span><h3>Secrets stay out</h3><p>The API key lives in a git-ignored <span class="mono">.env</span>; only the code and docs reach GitHub, the dataset goes to the Hub. Nothing sensitive is ever committed.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- STACK -->
+<section id="stack">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="eyebrow">Built with</div>
+      <h2>Tools &amp; libraries.</h2>
+    </div>
+    <div class="stack reveal">
+      <span class="chip"><b>google-genai</b> Gemini API</span>
+      <span class="chip"><b>datasets</b> JSONL → Hub</span>
+      <span class="chip"><b>huggingface_hub</b> auth + upload</span>
+      <span class="chip"><b>pyyaml</b> config</span>
+      <span class="chip"><b>python-dotenv</b> secrets</span>
+      <span class="chip"><b>argparse</b> CLI</span>
+      <span class="chip"><b>hashlib</b> de-dup</span>
+      <span class="chip"><b>Python 3</b> runtime</span>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER / LINKS -->
+<footer id="links">
+  <div class="wrap">
+    <h2>See the code or pull the data.</h2>
+    <p>The full pipeline, config and docs are open on GitHub. The generated dataset is published on the Hugging Face Hub.</p>
+    <div class="cta-row" style="justify-content:center;">
+      <a class="btn primary" href="https://github.com/saifihiba1122/Q-A-dataset" target="_blank" rel="noopener">GitHub repository</a>
+      <a class="btn ghost" href="https://huggingface.co/datasets/saifigohar1122/new-data_set" target="_blank" rel="noopener">Hugging Face dataset</a>
+    </div>
+    <div class="foot-meta">Built by saifihiba1122 · Markdown → Q&amp;A · Gemini · Hugging Face</div>
+  </div>
+</footer>
+
+<script>
+  // scroll reveal
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} });
+  },{threshold:.14});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>
