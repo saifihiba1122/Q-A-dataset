@@ -1,0 +1,81 @@
+# =============================================================================
+# config.yaml — Dataset Pipeline Configuration
+# =============================================================================
+# All tunable parameters live here instead of inside the Python scripts.
+# Edit this file to change behavior; you should not need to touch the .py file.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Paths — where files are read from / written to
+# -----------------------------------------------------------------------------
+paths:
+  markdown_dir: "D:\\data_set\\markdown_chemistry_only"  # ONLY Chemistry-LR.md goes here
+  output_dir: "D:\\data_set\\output"                     # output: per-book + combined JSONL
+  combined_filename: "train.jsonl"                       # final combined training file name
+
+# -----------------------------------------------------------------------------
+# Chunking — how source text is split before being sent to the LLM
+# -----------------------------------------------------------------------------
+# Chemistry-LR.md = 480,419 words. These sizes give a FIXED, known number of
+# chunks, so the total API calls are predictable:
+#
+#   QA pass      : step = 54300 - 200 = 54100  ->  480419 / 54100  =  9 chunks
+#   Summary pass : step = 99370 - 300 = 99070  ->  480419 / 99070  =  5 chunks
+#   --------------------------------------------------------------
+#   TOTAL                                                    = 14 requests
+#
+# 14 is comfortably under the 18 budget below (4 spare calls for any retries).
+# If you swap the source file, just run `python 02_markdown_to_qa.py status`
+# to see the new chunk count BEFORE spending any quota.
+chunking:
+  qa:
+    chunk_size_words: 54300
+    overlap_words: 200
+    min_chunk_words: 100
+  summary:
+    chunk_size_words: 99370
+    overlap_words: 300
+    min_chunk_words: 200
+
+# -----------------------------------------------------------------------------
+# Generation — Gemini model + Q&A/summary generation behavior
+# -----------------------------------------------------------------------------
+generation:
+  provider: "gemini"
+  model: "gemini-2.5-flash"     # high free-tier quota vs "pro" models
+  max_qa_per_chunk: 25          # each chunk is large, so allow many Q&A
+  temperature: 0.7
+  max_output_tokens: 65536      # high, so 25 Q&A pairs are never cut off mid-JSON
+  generate_summary: true        # produce 1 summary record per summary-chunk
+  generate_qa: true             # produce Q&A records per qa-chunk
+
+# -----------------------------------------------------------------------------
+# Rate limiting — keeps free-tier API usage under quota
+# -----------------------------------------------------------------------------
+rate_limit:
+  seconds_between_requests: 8     # ~7 req/min, stays under the per-minute free-tier limit
+  max_retries: 3
+  initial_backoff_seconds: 15
+  backoff_multiplier: 2
+
+  # HARD CEILING on API calls per day.
+  # EVERY call counts here — including failed/retried ones — because Google
+  # counts those too. The script stops the moment this number is reached, so
+  # your real usage can never exceed it. Set to 18 to stay safely under 20.
+  daily_request_limit: 18
+  progress_file: "progress.json"  # tracks requests used today + resume point
+
+# -----------------------------------------------------------------------------
+# Validation — quality filters applied to generated records
+# -----------------------------------------------------------------------------
+validation:
+  deduplicate: true              # drop records with duplicate instructions (now persists across runs)
+  min_output_words: 5
+
+# -----------------------------------------------------------------------------
+# Hugging Face Hub — push settings
+# -----------------------------------------------------------------------------
+huggingface:
+  repo_id: "saifigohar1122/new-data_set"   # <-- EDIT THIS
+  private: false
+  push_per_book_files: false
