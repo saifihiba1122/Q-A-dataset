@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fine-tuning Qwen2.5-7B — Case Study</title>
+<meta name="description" content="Fine-tuned Qwen2.5-7B on a custom dataset with QLoRA — training only 0.53% of the weights on a free GPU." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0d1a21;
+    --panel:#12262f;
+    --panel-2:#16313c;
+    --line:#234653;
+    --line-soft:#1a3742;
+    --ink:#e9f1f2;
+    --muted:#7f9aa6;
+    --amber:#f2a33c;
+    --amber-soft:#f7c074;
+    --cyan:#5fd0c8;
+    --radius:14px;
+    --maxw:1080px;
+}
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1100px 560px at 82% -10%, rgba(95,208,200,.08), transparent 60%),
+      radial-gradient(900px 500px at -10% 18%, rgba(242,163,60,.06), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,sans-serif;
+    line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden;
+  }
+  a{color:inherit;}
+  body::before{
+    content:"";position:fixed;inset:0;
+    background-image:linear-gradient(var(--line-soft) 1px,transparent 1px),linear-gradient(90deg,var(--line-soft) 1px,transparent 1px);
+    background-size:46px 46px;opacity:.22;pointer-events:none;
+    mask-image:radial-gradient(circle at 50% 30%,black,transparent 85%);z-index:0;
+  }
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px;position:relative;z-index:1;}
+  .mono{font-family:"IBM Plex Mono",monospace;}
+  .eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.74rem;letter-spacing:.22em;text-transform:uppercase;color:var(--amber);}
+
+  nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(10px);
+    background:linear-gradient(to bottom,rgba(13,26,33,.92),rgba(13,26,33,.55));border-bottom:1px solid var(--line-soft);}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:62px;}
+  .brand{display:flex;align-items:center;gap:10px;font-family:"Space Grotesk";font-weight:700;}
+  .brand .dot{width:11px;height:11px;border-radius:3px;background:var(--amber);box-shadow:0 0 14px var(--amber);}
+  .nav-links{display:flex;gap:26px;font-size:.9rem;}
+  .nav-links a{text-decoration:none;color:var(--muted);transition:color .2s;}
+  .nav-links a:hover{color:var(--ink);}
+  @media(max-width:680px){.nav-links{display:none;}}
+
+  header{padding:80px 0 36px;}
+  .h-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:46px;align-items:center;}
+  @media(max-width:900px){.h-grid{grid-template-columns:1fr;gap:34px;}}
+  h1{font-family:"Space Grotesk";font-weight:700;font-size:clamp(2rem,4.6vw,3.4rem);line-height:1.05;letter-spacing:-.02em;margin:18px 0 0;}
+  h1 .hl{color:var(--amber);}
+  .lead{color:#c3d3d6;font-size:1.06rem;margin-top:20px;max-width:36ch;}
+  .cta-row{display:flex;flex-wrap:wrap;gap:13px;margin-top:28px;}
+  .btn{display:inline-flex;align-items:center;gap:9px;font-family:"IBM Plex Mono",monospace;font-size:.88rem;
+    padding:12px 18px;border-radius:10px;text-decoration:none;border:1px solid var(--line);transition:transform .15s,border-color .2s,background .2s;}
+  .btn:focus-visible{outline:2px solid var(--cyan);outline-offset:3px;}
+  .btn.primary{background:var(--amber);color:#241502;border-color:var(--amber);font-weight:600;}
+  .btn.primary:hover{transform:translateY(-2px);background:var(--amber-soft);}
+  .btn.ghost{color:var(--ink);background:rgba(255,255,255,.02);}
+  .btn.ghost:hover{transform:translateY(-2px);border-color:var(--cyan);color:#fff;}
+  .btn svg{width:16px;height:16px;}
+
+  /* SIGNATURE: loss chart */
+  .chart-card{background:linear-gradient(160deg,var(--panel),var(--bg));border:1px solid var(--line);
+    border-radius:var(--radius);padding:20px;box-shadow:0 30px 60px -30px rgba(0,0,0,.7);}
+  .chart-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;}
+  .chart-head .t{font-family:"IBM Plex Mono";font-size:.72rem;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;}
+  .chart-head .d{font-family:"IBM Plex Mono";font-size:.72rem;color:var(--cyan);}
+  svg .grid{stroke:var(--line-soft);stroke-width:1;}
+  svg .ytick,svg .xtick{fill:var(--muted);font-family:"IBM Plex Mono";font-size:10px;}
+  svg .ytick{text-anchor:end;}
+  svg .xtick{text-anchor:middle;}
+  svg .lossline{fill:none;stroke:var(--amber);stroke-width:2.4;stroke-linejoin:round;stroke-linecap:round;}
+  svg .axis{stroke:var(--line);stroke-width:1.2;}
+  .chart-cap{font-family:"IBM Plex Mono";font-size:.72rem;color:var(--muted);margin-top:10px;text-align:center;}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line-soft);
+    border:1px solid var(--line-soft);border-radius:var(--radius);overflow:hidden;margin-top:50px;}
+  @media(max-width:680px){.stats{grid-template-columns:repeat(2,1fr);}}
+  .stat{background:var(--bg);padding:22px 20px;}
+  .stat .n{font-family:"Space Grotesk";font-weight:700;font-size:1.65rem;}
+  .stat .n b{color:var(--amber);}
+  .stat .l{font-family:"IBM Plex Mono";font-size:.7rem;letter-spacing:.05em;color:var(--muted);margin-top:4px;text-transform:uppercase;}
+
+  section{padding:74px 0;border-top:1px solid var(--line-soft);}
+  .sec-head{max-width:60ch;margin-bottom:38px;}
+  .sec-head h2{font-family:"Space Grotesk";font-weight:700;font-size:clamp(1.5rem,3vw,2.1rem);margin:10px 0 0;letter-spacing:-.01em;}
+  .sec-head p{color:#b6c6c9;margin-top:12px;}
+
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  @media(max-width:760px){.two{grid-template-columns:1fr;}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px;}
+  .card .tag{font-family:"IBM Plex Mono";font-size:.7rem;color:var(--amber);letter-spacing:.1em;text-transform:uppercase;}
+  .card h3{font-family:"Space Grotesk";font-size:1.06rem;margin:10px 0 8px;}
+  .card p{color:#aebfc2;font-size:.95rem;margin:0;}
+
+  /* config table */
+  .cfg{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;}
+  .cfg-row{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line-soft);}
+  .cfg-row > div{background:var(--panel);padding:13px 18px;font-family:"IBM Plex Mono";font-size:.86rem;}
+  .cfg-row .k{color:var(--muted);}
+  .cfg-row .v{color:var(--ink);}
+  .cfg-row .v b{color:var(--amber);font-weight:500;}
+
+  .stack{display:flex;flex-wrap:wrap;gap:12px;}
+  .chip{font-family:"IBM Plex Mono";font-size:.84rem;border:1px solid var(--line);border-radius:9px;
+    padding:9px 14px;background:var(--panel);color:#cdd9da;}
+  .chip b{color:var(--amber);font-weight:500;}
+
+  footer{padding:60px 0 80px;border-top:1px solid var(--line-soft);text-align:center;}
+  footer h2{font-family:"Space Grotesk";font-size:clamp(1.4rem,3vw,2rem);margin:0 0 10px;}
+  footer p{color:var(--muted);margin:0 auto 24px;max-width:46ch;}
+  .foot-meta{margin-top:36px;font-family:"IBM Plex Mono";font-size:.74rem;color:var(--muted);}
+
+  .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease;}
+  .reveal.in{opacity:1;transform:none;}
+  @media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none;}html{scroll-behavior:auto;}}
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap nav-inner">
+    <div class="brand"><span class="dot"></span> qwen.finetune</div>
+    <div class="nav-links">
+      <a href="#method">Method</a><a href="#curve">Training</a><a href="#config">Config</a><a href="#stack">Stack</a><a href="#links">Links</a>
+    </div>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap h-grid">
+    <div>
+      <div class="eyebrow">Case study · Model fine-tuning</div>
+      <h1>Taught Qwen2.5-7B a new domain by training just <span class="hl">0.53%</span> of its weights — on a free GPU.</h1>
+      <p class="lead">A config-driven QLoRA pipeline: load a 7-billion-parameter model in 4-bit, attach LoRA adapters, fine-tune on a custom instruction dataset, and ship the adapter to the Hugging Face Hub.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="https://github.com/saifihiba1122/Q-A-dataset" target="_blank" rel="noopener">View on GitHub</a>
+        <a class="btn ghost" href="https://huggingface.co/saifigohar1122/qwen2.5-7b-qa-lora" target="_blank" rel="noopener">🤗 View Adapter</a>
+      </div>
+    </div>
+
+    <div class="chart-card reveal">
+      <div class="chart-head"><span class="t">training loss · 58 steps</span><span class="d">3.41 → 1.14</span></div>
+      <svg viewBox="0 0 700 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Training loss curve descending from 3.41 to about 1.0">
+        <line x1="52" y1="256.0" x2="680" y2="256.0" class="grid"/><text x="44" y="259.0" class="ytick">0.5</text><line x1="52" y1="216.7" x2="680" y2="216.7" class="grid"/><text x="44" y="219.7" class="ytick">1.0</text><line x1="52" y1="177.3" x2="680" y2="177.3" class="grid"/><text x="44" y="180.3" class="ytick">1.5</text><line x1="52" y1="138.0" x2="680" y2="138.0" class="grid"/><text x="44" y="141.0" class="ytick">2.0</text><line x1="52" y1="98.7" x2="680" y2="98.7" class="grid"/><text x="44" y="101.7" class="ytick">2.5</text><line x1="52" y1="59.3" x2="680" y2="59.3" class="grid"/><text x="44" y="62.3" class="ytick">3.0</text><line x1="52" y1="20.0" x2="680" y2="20.0" class="grid"/><text x="44" y="23.0" class="ytick">3.5</text>
+        <line x1="52" y1="20" x2="52" y2="256" class="axis"/>
+        <line x1="52" y1="256" x2="680" y2="256" class="axis"/>
+        <polyline class="lossline" points="52.0,26.9 63.0,58.9 74.0,41.0 85.1,51.8 96.1,108.3 107.1,110.2 118.1,134.9 129.1,157.4 140.1,188.3 151.2,192.3 162.2,207.0 173.2,201.3 184.2,207.1 195.2,201.9 206.2,224.4 217.3,206.8 228.3,209.9 239.3,228.5 250.3,230.8 261.3,223.8 272.4,223.1 283.4,224.0 294.4,231.2 305.4,209.8 316.4,234.4 327.4,220.7 338.5,223.8 349.5,225.0 360.5,251.3 371.5,213.4 382.5,235.0 393.5,242.7 404.6,223.2 415.6,244.9 426.6,226.6 437.6,226.2 448.6,224.3 459.6,226.7 470.7,216.0 481.7,245.8 492.7,231.6 503.7,231.7 514.7,249.5 525.8,239.0 536.8,219.4 547.8,223.6 558.8,227.6 569.8,232.2 580.8,216.8 591.9,206.7 602.9,221.4 613.9,244.8 624.9,232.4 635.9,233.4 646.9,226.8 658.0,241.6 669.0,234.8 680.0,213.3"/>
+        <circle cx="52.0" cy="26.9" r="4" fill="#e06d5a"/>
+        <circle cx="680.0" cy="213.3" r="4" fill="var(--cyan)"/>
+        <text x="52.0" y="274.0" class="xtick">1</text><text x="206.2" y="274.0" class="xtick">15</text><text x="371.5" y="274.0" class="xtick">30</text><text x="536.8" y="274.0" class="xtick">45</text><text x="680.0" y="274.0" class="xtick">58</text>
+        <text x="366" y="294" class="xtick" style="fill:var(--muted)">training step</text>
+      </svg>
+      <div class="chart-cap">Real loss from the actual run — Qwen2.5-7B · QLoRA · free Colab T4</div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="stats reveal">
+      <div class="stat"><div class="n"><b>7.66B</b></div><div class="l">total params</div></div>
+      <div class="stat"><div class="n">40.4M</div><div class="l">trained (0.53%)</div></div>
+      <div class="stat"><div class="n"><b>4-bit</b></div><div class="l">base precision</div></div>
+      <div class="stat"><div class="n">~4 min</div><div class="l">train time, 1× T4</div></div>
+    </div>
+  </div>
+</header>
+
+<section id="method">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="eyebrow">The technique</div>
+      <h2>QLoRA: a 7B model on a 16 GB GPU.</h2>
+      <p>Full fine-tuning of a 7B model needs multiple data-centre GPUs. Two ideas collapse that to a single free card.</p>
+    </div>
+    <div class="two">
+      <div class="card reveal"><div class="tag">Quantization</div><h3>4-bit frozen base</h3><p>The model's billions of weights are compressed from 16-bit to 4-bit and frozen. That alone cuts memory roughly 4×, which is what lets a 7B model load inside a free Colab T4.</p></div>
+      <div class="card reveal"><div class="tag">LoRA</div><h3>Train tiny adapters</h3><p>Instead of updating the frozen weights, small low-rank adapter matrices are trained alongside them. Only 40.4M of 7.66B parameters (0.53%) ever change — the adapter is a few megabytes, not gigabytes.</p></div>
+      <div class="card reveal"><div class="tag">SFT</div><h3>Supervised fine-tuning</h3><p>The model learns from (question → ideal answer) pairs, formatted with Qwen's chat template so it answers in the right structure. Pure imitation of the curated dataset.</p></div>
+      <div class="card reveal"><div class="tag">Efficiency</div><h3>Gradient tricks</h3><p>Gradient accumulation simulates a larger batch (2 × 4 = 8) within tight memory, and gradient checkpointing trades a little compute for a lot of saved VRAM. Together they keep the whole run on one card.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="curve">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="eyebrow">What the curve shows</div>
+      <h2>Loss fell, then settled.</h2>
+      <p>Training loss dropped sharply in the first ~10 steps as the adapter learned the dataset's format, then settled into the 0.7–1.0 band — a healthy curve for a small, focused dataset over two epochs.</p>
+    </div>
+    <div class="two">
+      <div class="card reveal"><div class="tag">Read it right</div><h3>Loss ≠ accuracy</h3><p>A falling loss means the model is fitting the data — it is not a percentage score. Real quality is judged separately by prompting the model and, later, structured evaluation.</p></div>
+      <div class="card reveal"><div class="tag">Honest scope</div><h3>225 examples</h3><p>This was a deliberately small dataset to prove the pipeline end-to-end. The biggest future gain comes from more curated data, not from tweaking hyperparameters.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="config">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="eyebrow">Reproducible</div>
+      <h2>The exact configuration.</h2>
+      <p>Every value lives in a single <span class="mono">finetune_config.yaml</span> — change a setting, not the code. Anyone can reproduce this run from the config alone.</p>
+    </div>
+    <div class="cfg reveal">
+      <div class="cfg-row"><div class="k">base_model</div><div class="v">Qwen2.5-7B-Instruct</div></div>
+      <div class="cfg-row"><div class="k">method</div><div class="v"><b>QLoRA</b> (4-bit + LoRA)</div></div>
+      <div class="cfg-row"><div class="k">lora_r / alpha</div><div class="v">16 / 16</div></div>
+      <div class="cfg-row"><div class="k">learning_rate</div><div class="v"><b>2e-4</b></div></div>
+      <div class="cfg-row"><div class="k">epochs</div><div class="v">2</div></div>
+      <div class="cfg-row"><div class="k">effective batch</div><div class="v">8 &nbsp;(2 × 4 accum)</div></div>
+      <div class="cfg-row"><div class="k">max_seq_length</div><div class="v">2048</div></div>
+      <div class="cfg-row"><div class="k">final loss</div><div class="v"><b>1.14</b></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="stack">
+  <div class="wrap">
+    <div class="sec-head reveal"><div class="eyebrow">Built with</div><h2>Tools &amp; libraries.</h2></div>
+    <div class="stack reveal">
+      <span class="chip"><b>Unsloth</b> 2× faster QLoRA</span>
+      <span class="chip"><b>TRL</b> SFTTrainer</span>
+      <span class="chip"><b>PEFT</b> LoRA adapters</span>
+      <span class="chip"><b>bitsandbytes</b> 4-bit</span>
+      <span class="chip"><b>Transformers</b> Qwen2.5</span>
+      <span class="chip"><b>datasets</b> HF data</span>
+      <span class="chip"><b>MLflow</b> tracking</span>
+      <span class="chip"><b>Colab T4</b> free GPU</span>
+    </div>
+  </div>
+</section>
+
+<footer id="links">
+  <div class="wrap">
+    <h2>Code, data and model — all open.</h2>
+    <p>The training notebook and config are on GitHub; the dataset and the trained adapter live on the Hugging Face Hub.</p>
+    <div class="cta-row" style="justify-content:center;">
+      <a class="btn primary" href="https://github.com/saifihiba1122/Q-A-dataset" target="_blank" rel="noopener">GitHub repository</a>
+      <a class="btn ghost" href="https://huggingface.co/saifigohar1122/qwen2.5-7b-qa-lora" target="_blank" rel="noopener">Model adapter</a>
+      <a class="btn ghost" href="https://huggingface.co/datasets/saifigohar1122/new-data_set" target="_blank" rel="noopener">Dataset</a>
+    </div>
+    <div class="foot-meta">Built by saifihiba1122 · Qwen2.5-7B · QLoRA · Hugging Face</div>
+  </div>
+</footer>
+
+<script>
+  const io = new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:.14});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>
